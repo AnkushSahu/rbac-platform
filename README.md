@@ -5,10 +5,10 @@ tests, containerization, infrastructure-as-code, and CI/CD.
 
 ## Features
 - **Django 5 + Django REST Framework** backend with PostgreSQL
-- Entities: **Team**, **Role**, **Policy**, **Membership** (User→Team with Role), **RolePolicy** (many-to-many)
-- CRUD APIs with validation & sensible defaults
+- Entities: **Team**, **Role**, **Policy**, **TeamRole** , **RolePolicy** (many-to-many)
+- CRUD APIs with validation 
 - Token auth via **django-rest-framework-simplejwt**
-- **CORS**, **Pagination**, **Filtering**, **Search**
+- **CORS**, **Pagination**
 - Unit & API tests using **pytest** + **pytest-django**
 - **React (Vite)** frontend (minimal but functional)
 - **Docker** for dev & prod, **docker-compose** for local
@@ -20,60 +20,14 @@ tests, containerization, infrastructure-as-code, and CI/CD.
 
 ---
 
-## Quickstart (Local Dev)
+## Deployment 
+- docker compose build --no-cache
+- docker up -d
+- docker compose logs -f frontend (frontend running logs)
+- docker compose logs -f backend (backend running logs)
+- docker compose down -v ( to kill all containers)
 
-```bash
-cp .env.example .env
-docker compose up -d --build
-# Backend: http://localhost:8000
-# Frontend: http://localhost:5173
-# API docs (drf-spectacular): http://localhost:8000/api/schema/swagger-ui/
-```
-
-Create superuser (optional; compose handles initial migration):
-```bash
-docker compose exec backend python manage.py createsuperuser
-```
-
-Run tests:
-```bash
-docker compose exec backend pytest -q
-```
-
----
-
-## Production Build
-
-### 1) Build & push images
-Set your registry env vars in Jenkins or locally:
-- `IMAGE_REPO` (e.g. ghcr.io/you/rbac)
-- `IMAGE_TAG` (e.g. git SHA)
-
-Then Jenkinsfile (or locally) builds and pushes two images:
-- `${IMAGE_REPO}/backend:${IMAGE_TAG}`
-- `${IMAGE_REPO}/frontend:${IMAGE_TAG}`
-
-### 2) Provision EC2 with Terraform
-In `terraform/`:
-```bash
-terraform init
-terraform apply -auto-approve   -var="aws_region=ap-south-1"   -var="key_pair_name=your-key"   -var="project_name=rbac-platform"   -var="allow_cidr=0.0.0.0/0"
-```
-Note the `public_ip` output.
-
-### 3) Deploy with Ansible
-Update `ansible/inventory.ini` with the EC2 IP. Then:
-```bash
-ansible-galaxy collection install community.docker
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml   -e image_repo="ghcr.io/you/rbac" -e image_tag="latest"
-```
-
-Ansible will:
-- Install Docker/compose if needed
-- Upload `.env` (from your local `.env`)
-- Pull and run the `docker-compose.prod.yml` on the server
-
----
+ 
 
 ## API (selected endpoints)
 
