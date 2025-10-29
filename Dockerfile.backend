@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+USER root
+WORKDIR /app
+
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm -rf /root/.cache/pip
+
+COPY backend /app/backend
+
+RUN useradd -u 1000 -m appuser && \
+    mkdir -p /app/backend/staticfiles && \
+    chown -R appuser:appuser /app
+
+COPY backend/entrypoint.sh /app/backend/entrypoint.sh
+RUN chmod +x /app/backend/entrypoint.sh
+USER appuser
+WORKDIR /app/backend
+
+ENTRYPOINT ["/bin/sh", "/app/backend/entrypoint.sh"]
