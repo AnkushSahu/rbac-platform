@@ -1,58 +1,72 @@
 pipeline {
   agent any
-  environment {
-    IMAGE_REPO = credentials('RBAC_IMAGE_REPO') // e.g., ghcr.io/you/rbac
-    IMAGE_TAG = "${env.GIT_COMMIT}"
+
+  parameters {
+    string(name: 'IMAGE_REPO', defaultValue: 'your default image base url', description: 'Base image repo')
+    string(name: 'VERSION', defaultValue: 'latest', description: 'Image tag (default latest)')
   }
-  options { timestamps() }
+
+  environment {
+    BACKEND_IMG = "${params.IMAGE_REPO}/backend:${params.VERSION}"
+    FRONTEND_IMG = "${params.IMAGE_REPO}/frontend:${params.VERSION}"
+    REGISTRY = "ghcr.io"
+  }
+
   stages {
     stage('Checkout') { steps { checkout scm } }
-    stage('Python Setup & Test') {
-      agent { docker { image 'python:3.11-slim' } }
+
+    stage('Docker Login') {
       steps {
-        sh '''
-          pip install --no-cache-dir -r backend/requirements.txt
-          pip install --no-cache-dir pytest pytest-django black isort flake8
-          black --check backend || true
-          isort --check-only backend || true
-          flake8 backend || true
-          cd backend && pytest -q
-        '''
+        withCredentials([usernamePassword(credentialsId: 'REGISTRY_CREDS', usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+          sh '''
+            if [ -n "$REGISTRY" ]; then
+              echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin
+            fi
+          '''
+        }
       }
     }
-    stage('Frontend Build') {
-      agent { docker { image 'node:20-alpine' } }
+
+    stage('Build backend') {
+      steps { sh 'docker build -f Dockerfile.backend -t "$BACKEND_IMG" .' }
+    }
+
+    stage('Build frontend') {
       steps {
-        sh '''
-          cd frontend
-          npm ci
-          npm run build
-        '''
+        script {
+          def apiUrl = sh(script: "grep VITE_API_BASE .env | cut -d '=' -f2-", returnStdout: true).trim()
+          sh """
+            docker build \
+              --build-arg VITE_API="${apiUrl}" \
+              -f Dockerfile.frontend \
+              -t "$FRONTEND_IMG" \
+              .
+          """
+        }
       }
     }
-    stage('Build & Push Images') {
+
+    stage('Push images') {
       steps {
-        sh '''
-          docker build -f Dockerfile.backend -t ${IMAGE_REPO}/backend:${IMAGE_TAG} .
-          docker build -f Dockerfile.frontend -t ${IMAGE_REPO}/frontend:${IMAGE_TAG} .
-          echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin || true
-          docker push ${IMAGE_REPO}/backend:${IMAGE_TAG}
-          docker push ${IMAGE_REPO}/frontend:${IMAGE_TAG}
-        '''
+        sh 'docker push "$BACKEND_IMG"'
+        sh 'docker push "$FRONTEND_IMG"'
       }
     }
-    stage('Deploy (Ansible)') {
-      when { expression { return params.DEPLOY == null || params.DEPLOY == true } }
+
+    stage('Deploy') {
       steps {
-        sh '''
-          ansible-galaxy collection install community.docker
-          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
-            -e image_repo="${IMAGE_REPO}" -e image_tag="${IMAGE_TAG}"
-        '''
+        withCredentials([sshUserPrivateKey(credentialsId: 'EC2_SSH_KEY', keyFileVariable: 'SSH_KEY')]) {
+          sh '''
+            ansible-galaxy collection install community.docker
+            ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
+              -e IMAGE_REPO="${IMAGE_REPO}" \
+              -e IMAGE_TAG="${VERSION}" \
+              --private-key "$SSH_KEY"
+          '''
+        }
       }
     }
   }
-  post {
-    always { archiveArtifacts artifacts: 'frontend/dist/**,backend/**/reports/**', allowEmptyArchive: true }
-  }
+
+  post { always { sh 'docker image prune -f || true' } }
 }
