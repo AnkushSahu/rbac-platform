@@ -1,34 +1,38 @@
-- name: Deploy RBAC platform
-  hosts: rbac
+---
+- hosts: rbac
   become: true
   vars:
-    image_repo: "ghcr.io/you/rbac"
-    image_tag: "latest"
+    app_dir: /opt/rbac
+    image_repo: "{{ IMAGE_REPO | default('ghcr.io/youruser/rbac') }}"
+    image_tag: "{{ IMAGE_TAG  | default('latest') }}"
+
   tasks:
-    - name: Ensure Docker is present
+    - name: Ensure docker + compose
       apt:
-        name:
-          - docker.io
-          - docker-compose-plugin
+        name: [docker.io, docker-compose-plugin]
         state: present
         update_cache: yes
 
-    - name: Create app directory
-      file: { path: /opt/rbac, state: directory }
+    - name: Create app dir
+      file: { path: "{{ app_dir }}", state: directory, mode: "0755" }
 
-    - name: Upload .env
+    - name: Copy .env from repo
       copy:
         src: ../.env
-        dest: /opt/rbac/.env
-        mode: "0600"
+        dest: "{{ app_dir }}/.env"
+        mode: "0640"
 
-    - name: Upload prod compose
+    - name: Upload compose file
       copy:
-        src: ../docker-compose.yml
-        dest: /opt/rbac/docker-compose.yml
+        src: ../docker-compose.prod.yml
+        dest: "{{ app_dir }}/docker-compose.yml"
+        mode: "0644"
 
-    - name: Pull and run
+    - name: Run stack
       community.docker.docker_compose_v2:
-        project_src: /opt/rbac
+        project_src: "{{ app_dir }}"
         state: present
         pull: always
+        env:
+          IMAGE_REPO: "{{ image_repo }}"
+          IMAGE_TAG: "{{ image_tag }}"
